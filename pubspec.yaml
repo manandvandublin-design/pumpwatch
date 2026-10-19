@@ -1,0 +1,22 @@
+name: pumpwatch
+description: PumpWatch - petrol and diesel prices in Ireland, reported by drivers.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: any
+  geolocator: any
+  flutter_map: any
+  latlong2: any
+  image_picker: any
+  google_mlkit_text_recognition: any
+  shared_preferences: any
+  url_launcher: any
+
+flutter:
+  uses-material-design: true
