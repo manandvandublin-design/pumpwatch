@@ -10,7 +10,6 @@ const dublinLon = -6.2603;
 class AppState extends ChangeNotifier {
   late SharedPreferences _prefs;
 
-  String serverUrl = '';
   String fuel = 'petrol';
   double radiusKm = 5;
   int maxAgeDays = 14;
@@ -25,11 +24,10 @@ class AppState extends ChangeNotifier {
   bool loading = false;
   String? error;
 
-  Api get api => Api(serverUrl);
+  final Api api = Api();
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    serverUrl = _prefs.getString('serverUrl') ?? '';
     fuel = _prefs.getString('fuel') ?? 'petrol';
     radiusKm = _prefs.getDouble('radiusKm') ?? 5;
     maxAgeDays = _prefs.getInt('maxAgeDays') ?? 14;
@@ -38,7 +36,6 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> save() async {
-    await _prefs.setString('serverUrl', serverUrl);
     await _prefs.setString('fuel', fuel);
     await _prefs.setDouble('radiusKm', radiusKm);
     await _prefs.setInt('maxAgeDays', maxAgeDays);
@@ -75,12 +72,6 @@ class AppState extends ChangeNotifier {
 
   Future<void> refresh({bool relocate = false}) async {
     if (relocate || !haveLocation) await locate();
-    if (serverUrl.isEmpty) {
-      error = 'Open Settings and enter your PC server address to see prices.';
-      stations = [];
-      notifyListeners();
-      return;
-    }
     loading = true;
     error = null;
     notifyListeners();

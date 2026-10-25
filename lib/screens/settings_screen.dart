@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
+
+const privacyUrl = 'https://viptech.app/privacy/pumpwatch';
+const contactEmail = 'viptechviptech@gmail.com';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -11,58 +14,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController serverCtl = TextEditingController(text: app.serverUrl);
   late final TextEditingController alertCtl = TextEditingController(text: app.alertBelow.toStringAsFixed(3));
-  String? serverMsg;
-  String? hiveMsg;
-  bool testing = false;
-  bool checkingHive = false;
 
   @override
   void dispose() {
-    serverCtl.dispose();
     alertCtl.dispose();
     super.dispose();
-  }
-
-  Future<void> saveServer() async {
-    var v = serverCtl.text.trim();
-    if (v.isNotEmpty && !v.startsWith('http')) v = 'http://$v';
-    if (v.isNotEmpty && !RegExp(r':\d+').hasMatch(v.replaceFirst(RegExp(r'^https?://'), ''))) v = '$v:8080';
-    serverCtl.text = v;
-    app.serverUrl = v;
-    await app.save();
-    setState(() {
-      testing = true;
-      serverMsg = null;
-    });
-    try {
-      await Api(v).health();
-      serverMsg = 'Connected to the server.';
-      app.refresh();
-    } catch (e) {
-      serverMsg = e.toString();
-    }
-    if (mounted) setState(() => testing = false);
-  }
-
-  Future<void> checkHivemapper() async {
-    setState(() {
-      checkingHive = true;
-      hiveMsg = null;
-    });
-    try {
-      await app.locate();
-      final r = await app.api.hivemapperCheck(app.lat, app.lon);
-      final n = r['features'] ?? 0;
-      final signs = r['price_signs'] ?? 0;
-      hiveMsg = n == 0
-          ? 'Hivemapper has no map data within 1.2 km of you yet.'
-          : 'Hivemapper has $n road features near you, including $signs price signs.';
-    } catch (e) {
-      hiveMsg = e.toString();
-    }
-    if (mounted) setState(() => checkingHive = false);
   }
 
   @override
@@ -73,32 +30,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: [
           const Text('Settings', style: titleStyle),
-          const SizedBox(height: 16),
-          const Text('SERVER', style: capsStyle),
-          const SizedBox(height: 8),
-          Card2(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              TextField(
-                controller: serverCtl,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'Server address',
-                  hintText: 'http://192.168.1.20:8080',
-                  helperText: 'Shown when you start server.py on your PC',
-                ),
-                onSubmitted: (_) => saveServer(),
-              ),
-              const SizedBox(height: 10),
-              FilledButton(
-                onPressed: testing ? null : saveServer,
-                child: Text(testing ? 'Connecting…' : 'Save and test'),
-              ),
-              if (serverMsg != null) ...[
-                const SizedBox(height: 8),
-                Text(serverMsg!, style: const TextStyle(color: muted)),
-              ],
-            ]),
-          ),
           const SizedBox(height: 16),
           const Text('PREFERENCES', style: capsStyle),
           const SizedBox(height: 8),
@@ -183,27 +114,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
           ),
           const SizedBox(height: 16),
-          const Text('DATA', style: capsStyle),
+          const Text('ABOUT', style: capsStyle),
           const SizedBox(height: 8),
           Card2(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              const Text('Powered by drivers + Hivemapper',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const Text('Prices from drivers', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               const Text(
-                'Prices come from photos drivers take in the app. The text on the sign is read on your phone. '
-                'Hivemapper dashcam data will be added where it covers Ireland.',
+                'Prices come from photos drivers take in the app. The text on the sign is read on your phone; '
+                'the photo itself is never uploaded. Always check the pump before filling up.',
                 style: TextStyle(color: muted, height: 1.4),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               OutlinedButton(
-                onPressed: checkingHive ? null : checkHivemapper,
-                child: Text(checkingHive ? 'Checking…' : 'Check Hivemapper coverage here'),
+                onPressed: () => launchUrl(Uri.parse(privacyUrl), mode: LaunchMode.externalApplication),
+                child: const Text('Privacy policy'),
               ),
-              if (hiveMsg != null) ...[
-                const SizedBox(height: 8),
-                Text(hiveMsg!, style: const TextStyle(color: muted)),
-              ],
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () => launchUrl(Uri.parse('mailto:$contactEmail?subject=PumpWatch')),
+                child: const Text('Contact us'),
+              ),
+              const SizedBox(height: 8),
+              const Text('PumpWatch by VIP Tech · version 1.0.0',
+                  textAlign: TextAlign.center, style: TextStyle(color: muted, fontSize: 12)),
             ]),
           ),
         ],

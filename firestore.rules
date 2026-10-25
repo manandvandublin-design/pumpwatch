@@ -1,0 +1,67 @@
+rules_version = '2';
+// PumpWatch Firestore rules.
+// Paste into Firebase console > Firestore Database > Rules > Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function validPrice(p) {
+      return p is map
+        && p.keys().hasOnly(['price', 'source', 'reportedAt'])
+        && p.price is number && p.price >= 0.5 && p.price <= 4.0
+        && p.source == 'photo'
+        && p.reportedAt == request.time;
+    }
+
+    function validPrices(m) {
+      return m is map
+        && m.keys().hasOnly(['petrol', 'diesel'])
+        && (!('petrol' in m) || validPrice(m.petrol))
+        && (!('diesel' in m) || validPrice(m.diesel));
+    }
+
+    // On an update, only the fuels that changed must be fresh, valid prices.
+    function changedPricesValid(next, prev) {
+      let changed = next.diff(prev).affectedKeys();
+      return next is map
+        && next.keys().hasOnly(['petrol', 'diesel'])
+        && changed.size() > 0
+        && (!('petrol' in changed) || validPrice(next.petrol))
+        && (!('diesel' in changed) || validPrice(next.diesel));
+    }
+
+    match /stations/{id} {
+      allow read: if true;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'lat', 'lon', 'prices', 'createdBy', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.lat is number && request.resource.data.lat > 51.2 && request.resource.data.lat < 55.5
+        && request.resource.data.lon is number && request.resource.data.lon > -10.8 && request.resource.data.lon < -5.3
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && validPrices(request.resource.data.prices);
+
+      // Price updates only: name and position can't be changed from the app.
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['prices', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && changedPricesValid(request.resource.data.prices, resource.data.prices);
+
+      allow delete: if false;
+    }
+
+    match /reports/{id} {
+      allow read: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['stationId', 'fuel', 'price', 'source', 'lat', 'lon', 'uid', 'reportedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.fuel in ['petrol', 'diesel']
+        && request.resource.data.price is number && request.resource.data.price >= 0.5 && request.resource.data.price <= 4.0
+        && request.resource.data.source == 'photo'
+        && request.resource.data.reportedAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

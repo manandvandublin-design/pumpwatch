@@ -108,7 +108,7 @@ class _MapScreenState extends State<MapScreen> {
                         children: [
                           TileLayer(
                             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'ie.pumpwatch.pumpwatch',
+                            userAgentPackageName: 'app.viptech.pumpwatch',
                           ),
                           MarkerLayer(markers: markers),
                           const RichAttributionWidget(
@@ -191,10 +191,6 @@ class _MapScreenState extends State<MapScreen> {
       return Card2(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(app.error!, style: const TextStyle(color: muted)),
-          if (app.serverUrl.isEmpty) ...[
-            const SizedBox(height: 10),
-            FilledButton(onPressed: widget.onOpenSettings, child: const Text('Open Settings')),
-          ],
         ]),
       );
     }

@@ -1,4 +1,7 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+
+import 'firebase_options.dart';
 
 import 'screens/cheapest_screen.dart';
 import 'screens/map_screen.dart';
@@ -8,6 +11,7 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.android);
   await app.init();
   runApp(const PumpWatchApp());
 }
@@ -38,7 +42,6 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
-    if (app.serverUrl.isEmpty) tab = 2;
     app.refresh(relocate: true);
   }
 

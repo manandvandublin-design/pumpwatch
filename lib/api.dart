@@ -1,6 +1,12 @@
-import 'dart:convert';
+import 'dart:math' as math;
 
-import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+/// Firestore layout
+///   stations/{id}  name, lat, lon, prices.{petrol|diesel}.{price, source, reportedAt}, updatedAt
+///   reports/{id}   stationId, fuel, price, source, lat, lon, uid, reportedAt
+/// Rules are in firestore.rules.
 
 class FuelPrice {
   final double price;
@@ -9,17 +15,23 @@ class FuelPrice {
 
   FuelPrice(this.price, this.source, this.reportedAt);
 
-  factory FuelPrice.fromJson(Map<String, dynamic> j) => FuelPrice(
-        (j['price'] as num).toDouble(),
-        (j['source'] ?? 'photo') as String,
-        DateTime.tryParse(j['reported_at'] ?? '')?.toLocal() ?? DateTime.now(),
-      );
+  static FuelPrice? fromMap(Object? m) {
+    if (m is! Map) return null;
+    final p = m['price'];
+    if (p is! num) return null;
+    final t = m['reportedAt'];
+    return FuelPrice(
+      p.toDouble(),
+      (m['source'] ?? 'photo').toString(),
+      t is Timestamp ? t.toDate() : DateTime.now(),
+    );
+  }
 
   int get ageDays => DateTime.now().difference(reportedAt).inDays;
 }
 
 class Station {
-  final int id;
+  final String id;
   final String name;
   final double lat;
   final double lon;
@@ -35,16 +47,24 @@ class Station {
     required this.prices,
   });
 
-  factory Station.fromJson(Map<String, dynamic> j) {
+  factory Station.fromDoc(DocumentSnapshot<Map<String, dynamic>> d, {double? fromLat, double? fromLon}) {
+    final j = d.data() ?? {};
+    final lat = (j['lat'] as num?)?.toDouble() ?? 0;
+    final lon = (j['lon'] as num?)?.toDouble() ?? 0;
     final p = <String, FuelPrice>{};
-    final raw = (j['prices'] ?? {}) as Map<String, dynamic>;
-    raw.forEach((k, v) => p[k] = FuelPrice.fromJson(v as Map<String, dynamic>));
+    final raw = j['prices'];
+    if (raw is Map) {
+      for (final fuel in const ['petrol', 'diesel']) {
+        final fp = FuelPrice.fromMap(raw[fuel]);
+        if (fp != null) p[fuel] = fp;
+      }
+    }
     return Station(
-      id: j['id'] as int,
-      name: j['name'] as String,
-      lat: (j['lat'] as num).toDouble(),
-      lon: (j['lon'] as num).toDouble(),
-      distanceKm: (j['distance_km'] as num?)?.toDouble(),
+      id: d.id,
+      name: (j['name'] ?? 'Station').toString(),
+      lat: lat,
+      lon: lon,
+      distanceKm: fromLat == null ? null : distanceM(fromLat, fromLon!, lat, lon) / 1000.0,
       prices: p,
     );
   }
@@ -57,6 +77,14 @@ class Station {
   }
 }
 
+double distanceM(double lat1, double lon1, double lat2, double lon2) {
+  const r = 6371000.0;
+  double rad(double d) => d * math.pi / 180;
+  final dp = rad(lat2 - lat1), dl = rad(lon2 - lon1);
+  final a = math.pow(math.sin(dp / 2), 2) + math.cos(rad(lat1)) * math.cos(rad(lat2)) * math.pow(math.sin(dl / 2), 2);
+  return 2 * r * math.asin(math.sqrt(a));
+}
+
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);
@@ -65,69 +93,114 @@ class ApiException implements Exception {
 }
 
 class Api {
-  final String baseUrl;
-  Api(String base) : baseUrl = base.trim().replaceAll(RegExp(r'/+$'), '');
+  final _db = FirebaseFirestore.instance;
 
-  Uri _u(String path, [Map<String, String>? q]) => Uri.parse('$baseUrl$path').replace(queryParameters: q);
+  CollectionReference<Map<String, dynamic>> get _stations => _db.collection('stations');
+  CollectionReference<Map<String, dynamic>> get _reports => _db.collection('reports');
 
-  Future<Map<String, dynamic>> _get(String path, [Map<String, String>? q]) async {
-    if (baseUrl.isEmpty) throw ApiException('Set the server address in Settings first.');
-    final http.Response r;
-    try {
-      r = await http.get(_u(path, q)).timeout(const Duration(seconds: 45));
-    } catch (_) {
-      throw ApiException('Can\'t reach the server at $baseUrl. Is it running, and is your phone on the same Wi-Fi?');
+  Future<String> _uid() async {
+    final auth = FirebaseAuth.instance;
+    if (auth.currentUser == null) {
+      try {
+        await auth.signInAnonymously();
+      } catch (_) {
+        throw ApiException('Could not connect. Check your internet connection.');
+      }
     }
-    final body = jsonDecode(r.body) as Map<String, dynamic>;
-    if (r.statusCode >= 400) throw ApiException((body['error'] ?? 'Server error ${r.statusCode}').toString());
-    return body;
+    return auth.currentUser!.uid;
   }
 
-  Future<bool> health() async => (await _get('/api/health'))['ok'] == true;
-
+  /// Stations within [radiusKm], nearest first. Uses one range query on latitude
+  /// (no extra Firestore index needed) and filters longitude on the phone.
   Future<List<Station>> stations(double lat, double lon, double radiusKm) async {
-    final j = await _get('/api/stations', {
-      'lat': '$lat',
-      'lon': '$lon',
-      'radius_km': '$radiusKm',
-    });
-    return (j['stations'] as List).map((e) => Station.fromJson(e as Map<String, dynamic>)).toList();
+    await _uid();
+    final dLat = radiusKm / 111.0;
+    try {
+      final snap = await _stations
+          .where('lat', isGreaterThanOrEqualTo: lat - dLat)
+          .where('lat', isLessThanOrEqualTo: lat + dLat)
+          .limit(500)
+          .get()
+          .timeout(const Duration(seconds: 20));
+      final list = snap.docs
+          .map((d) => Station.fromDoc(d, fromLat: lat, fromLon: lon))
+          .where((s) => s.distanceKm! <= radiusKm)
+          .toList()
+        ..sort((a, b) => a.distanceKm!.compareTo(b.distanceKm!));
+      return list;
+    } on FirebaseException catch (e) {
+      throw ApiException('Could not load prices (${e.code}).');
+    } catch (_) {
+      throw ApiException('Could not load prices. Check your internet connection.');
+    }
   }
 
-  Future<Map<String, dynamic>> hivemapperCheck(double lat, double lon) =>
-      _get('/api/hivemapper/check', {'lat': '$lat', 'lon': '$lon'});
-
+  /// Saves a price report. Matches a known station within 150 m, or adds a new one.
   Future<Station> report({
     required double lat,
     required double lon,
     double? petrol,
     double? diesel,
-    int? stationId,
+    String? stationId,
     String? stationName,
   }) async {
-    if (baseUrl.isEmpty) throw ApiException('Set the server address in Settings first.');
-    final http.Response r;
-    try {
-      r = await http
-          .post(
-            _u('/api/reports'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'lat': lat,
-              'lon': lon,
-              if (petrol != null) 'petrol': petrol,
-              if (diesel != null) 'diesel': diesel,
-              if (stationId != null) 'station_id': stationId,
-              if (stationName != null && stationName.isNotEmpty) 'station_name': stationName,
-              'source': 'photo',
-            }),
-          )
-          .timeout(const Duration(seconds: 20));
-    } catch (_) {
-      throw ApiException('Can\'t reach the server at $baseUrl.');
+    final uid = await _uid();
+    for (final p in [petrol, diesel]) {
+      if (p != null && (p < 0.5 || p > 4.0)) {
+        throw ApiException('Prices must be in euro per litre, like 1.719');
+      }
     }
-    final body = jsonDecode(r.body) as Map<String, dynamic>;
-    if (r.statusCode >= 400) throw ApiException((body['error'] ?? 'Server error ${r.statusCode}').toString());
-    return Station.fromJson(body);
+    try {
+      DocumentReference<Map<String, dynamic>>? ref = stationId == null ? null : _stations.doc(stationId);
+      if (ref == null) {
+        final near = await stations(lat, lon, 0.2);
+        final close = near.where((s) => s.distanceKm! * 1000 <= 150).toList();
+        if (close.isNotEmpty) ref = _stations.doc(close.first.id);
+      }
+      final batch = _db.batch();
+      final now = FieldValue.serverTimestamp();
+      final isNew = ref == null;
+      ref ??= _stations.doc();
+      final newPrices = <String, dynamic>{};
+      final update = <String, dynamic>{'updatedAt': now};
+      for (final e in {'petrol': petrol, 'diesel': diesel}.entries) {
+        if (e.value == null) continue;
+        final price = double.parse(e.value!.toStringAsFixed(3));
+        final entry = {'price': price, 'source': 'photo', 'reportedAt': now};
+        newPrices[e.key] = entry;
+        update['prices.${e.key}'] = entry;
+        batch.set(_reports.doc(), {
+          'stationId': ref.id,
+          'fuel': e.key,
+          'price': price,
+          'source': 'photo',
+          'lat': lat,
+          'lon': lon,
+          'uid': uid,
+          'reportedAt': now,
+        });
+      }
+      if (isNew) {
+        final name = (stationName ?? '').trim();
+        batch.set(ref, {
+          'name': name.isEmpty ? 'Station near ${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}' : name,
+          'lat': lat,
+          'lon': lon,
+          'prices': newPrices,
+          'createdBy': uid,
+          'updatedAt': now,
+        });
+      } else {
+        batch.update(ref, update);
+      }
+      await batch.commit().timeout(const Duration(seconds: 20));
+      return Station.fromDoc(await ref.get(), fromLat: lat, fromLon: lon);
+    } on FirebaseException catch (e) {
+      throw ApiException('Could not save the price (${e.code}).');
+    } on ApiException {
+      rethrow;
+    } catch (_) {
+      throw ApiException('Could not save the price. Check your internet connection.');
+    }
   }
 }

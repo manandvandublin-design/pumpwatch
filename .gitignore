@@ -5,6 +5,8 @@ ios/
 .flutter-plugins
 .flutter-plugins-dependencies
 pubspec.lock
-server/pumpwatch.db
-server/beemaps_key.txt
 *.apk
+*.jks
+*.keystore
+key.properties
+google-services.json

@@ -1,7 +1,7 @@
 name: pumpwatch
 description: PumpWatch - petrol and diesel prices in Ireland, reported by drivers.
 publish_to: 'none'
-version: 0.1.0+1
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -9,7 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  http: any
+  firebase_core: any
+  cloud_firestore: any
+  firebase_auth: any
   geolocator: any
   flutter_map: any
   latlong2: any
@@ -18,5 +20,16 @@ dependencies:
   shared_preferences: any
   url_launcher: any
 
+dev_dependencies:
+  flutter_launcher_icons: any
+
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon/icon.png
+  adaptive_icon_background: "#F4F2EE"
+  adaptive_icon_foreground: assets/icon/icon_foreground.png
+  min_sdk_android: 24
