@@ -49,4 +49,17 @@ if 'create("release")' not in g:
     )
 gradle.write_text(g)
 assert 'signingConfigs.getByName("release")' in g, "release signing not patched"
+# ProGuard/R8 rules for release builds
+import shutil
+shutil.copy(root / "tool/proguard-rules.pro", root / "android/app/proguard-rules.pro")
+g = gradle.read_text()
+if "proguard-rules.pro" not in g:
+    g = g.replace(
+        'signingConfig = if (System.getenv("PW_KEYSTORE_PATH")',
+        'proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")\n'
+        '            signingConfig = if (System.getenv("PW_KEYSTORE_PATH")',
+        1,
+    )
+    gradle.write_text(g)
+assert "proguard-rules.pro" in g, "proguard rules not added"
 print("Android project patched")
