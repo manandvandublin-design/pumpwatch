@@ -125,7 +125,7 @@ String ago(DateTime t) {
 }
 
 String sourceLabel(String s) => switch (s) {
-      'hivemapper' => 'dashcam',
+      'hivemapper' || 'dashcam' => 'dashcam',
       'demo' => 'demo data',
       _ => 'driver photo',
     };

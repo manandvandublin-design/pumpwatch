@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../dashcam/dashcam_screen.dart';
 import '../state.dart';
 import '../theme.dart';
 
@@ -173,6 +174,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ]),
             ),
           ],
+          const SizedBox(height: 16),
+          const Text('CAR RADIO', style: capsStyle),
+          const SizedBox(height: 8),
+          Card2(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text(
+                'On an Android car radio with a USB dashcam: records video and reads petrol prices '
+                'as you pass stations, then shares them with everyone.',
+                style: TextStyle(color: muted, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DashcamScreen())),
+                icon: const Icon(Icons.videocam_outlined),
+                label: const Text('Dashcam mode'),
+              ),
+            ]),
+          ),
           const SizedBox(height: 16),
           const Text('ABOUT', style: capsStyle),
           const SizedBox(height: 8),

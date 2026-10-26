@@ -29,14 +29,18 @@ jobs:
           flutter create --platforms=android --org app.viptech --project-name pumpwatch .
           rm -rf test
           python3 tool/patch_android.py
+          python3 tool/fetch_stations.py
 
       - name: Get packages and icons
         run: |
-          flutter pub get
+          set -o pipefail
+          flutter pub get 2>&1 | tee pub.log || { bash tool/save_log.sh pub.log; exit 1; }
           dart run flutter_launcher_icons
 
       - name: Analyze
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        run: |
+          set -o pipefail
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee analyze.log || { bash tool/save_log.sh analyze.log; exit 1; }
 
       - name: Upload keystore
         env:
@@ -57,17 +61,8 @@ jobs:
           PW_KEY_PASSWORD: ${{ secrets.PW_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          report() {
-            # Save the full log to the ci-logs branch so it can be read with git
-            cp "$1" "$RUNNER_TEMP/build.log"
-            git config user.name ci && git config user.email ci@users.noreply.github.com
-            git checkout --orphan ci-logs >/dev/null 2>&1
-            git rm -rfq . >/dev/null 2>&1 || true
-            cp "$RUNNER_TEMP/build.log" build.log
-            git add build.log && git commit -qm "build ${{ github.run_number }} log" && git push -qf origin ci-logs
-          }
-          flutter build apk --release --dart-define=PW_TEST=true --build-number=${{ github.run_number }} 2>&1 | tee apk.log || { report apk.log; exit 1; }
-          flutter build appbundle --release --build-number=${{ github.run_number }} 2>&1 | tee aab.log || { report aab.log; exit 1; }
+          flutter build apk --release --dart-define=PW_TEST=true --build-number=${{ github.run_number }} 2>&1 | tee apk.log || { bash tool/save_log.sh apk.log; exit 1; }
+          flutter build appbundle --release --build-number=${{ github.run_number }} 2>&1 | tee aab.log || { bash tool/save_log.sh aab.log; exit 1; }
           mkdir -p out
           cp build/app/outputs/flutter-apk/app-release.apk out/pumpwatch-${{ github.run_number }}.apk
           cp build/app/outputs/bundle/release/app-release.aab out/pumpwatch-${{ github.run_number }}.aab

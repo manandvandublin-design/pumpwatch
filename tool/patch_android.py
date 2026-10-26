@@ -14,6 +14,10 @@ m = manifest.read_text()
 perms = """    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
 """
 if "ACCESS_FINE_LOCATION" not in m:
     m = m.replace("<application", perms + "    <application", 1)

@@ -143,8 +143,10 @@ class Api {
     double? diesel,
     String? stationId,
     String? stationName,
+    String source = 'photo',
   }) async {
     final uid = await _uid();
+    if (source != 'photo' && source != 'dashcam') source = 'photo';
     for (final p in [petrol, diesel]) {
       if (p != null && (p < 0.5 || p > 4.0)) {
         throw ApiException('Prices must be in euro per litre, like 1.719');
@@ -166,14 +168,14 @@ class Api {
       for (final e in {'petrol': petrol, 'diesel': diesel}.entries) {
         if (e.value == null) continue;
         final price = double.parse(e.value!.toStringAsFixed(3));
-        final entry = {'price': price, 'source': 'photo', 'reportedAt': now};
+        final entry = {'price': price, 'source': source, 'reportedAt': now};
         newPrices[e.key] = entry;
         update['prices.${e.key}'] = entry;
         batch.set(_reports.doc(), {
           'stationId': ref.id,
           'fuel': e.key,
           'price': price,
-          'source': 'photo',
+          'source': source,
           'lat': lat,
           'lon': lon,
           'uid': uid,

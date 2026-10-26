@@ -19,12 +19,17 @@ dependencies:
   google_mlkit_text_recognition: any
   shared_preferences: any
   url_launcher: any
+  camera: any
+  path_provider: any
+  wakelock_plus: any
 
 dev_dependencies:
   flutter_launcher_icons: any
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/stations.json
 
 flutter_launcher_icons:
   android: true

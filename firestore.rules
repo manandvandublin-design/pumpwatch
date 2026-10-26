@@ -10,7 +10,7 @@ service cloud.firestore {
       return p is map
         && p.keys().hasOnly(['price', 'source', 'reportedAt'])
         && p.price is number && p.price >= 0.5 && p.price <= 4.0
-        && p.source == 'photo'
+        && p.source in ['photo', 'dashcam']
         && p.reportedAt == request.time;
     }
 
@@ -59,7 +59,7 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.fuel in ['petrol', 'diesel']
         && request.resource.data.price is number && request.resource.data.price >= 0.5 && request.resource.data.price <= 4.0
-        && request.resource.data.source == 'photo'
+        && request.resource.data.source in ['photo', 'dashcam']
         && request.resource.data.reportedAt == request.time;
       allow update, delete: if false;
     }
