@@ -66,7 +66,7 @@ jobs:
             cp "$RUNNER_TEMP/build.log" build.log
             git add build.log && git commit -qm "build ${{ github.run_number }} log" && git push -qf origin ci-logs
           }
-          flutter build apk --release --build-number=${{ github.run_number }} 2>&1 | tee apk.log || { report apk.log; exit 1; }
+          flutter build apk --release --dart-define=PW_TEST=true --build-number=${{ github.run_number }} 2>&1 | tee apk.log || { report apk.log; exit 1; }
           flutter build appbundle --release --build-number=${{ github.run_number }} 2>&1 | tee aab.log || { report aab.log; exit 1; }
           mkdir -p out
           cp build/app/outputs/flutter-apk/app-release.apk out/pumpwatch-${{ github.run_number }}.apk

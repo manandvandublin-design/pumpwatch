@@ -4,7 +4,19 @@ import 'package:url_launcher/url_launcher.dart';
 import '../state.dart';
 import '../theme.dart';
 
+/// True only in test APKs (built with --dart-define=PW_TEST=true), never in the Play Store bundle.
+const isTestBuild = bool.fromEnvironment('PW_TEST');
+
 const privacyUrl = 'https://viptech.app/privacy/pumpwatch';
+
+/// Five well-spread points around Dublin for test data, clearly labelled TEST.
+const _testStations = [
+  ('TEST station – City Centre', 53.3498, -6.2603, 1.719, 1.689),
+  ('TEST station – Rathmines', 53.3226, -6.2654, 1.749, 1.709),
+  ('TEST station – Drumcondra', 53.3700, -6.2550, 1.769, 1.729),
+  ('TEST station – Inchicore', 53.3402, -6.3150, 1.739, 1.699),
+  ('TEST station – Clontarf', 53.3640, -6.2060, 1.789, 1.749),
+];
 const contactEmail = 'viptechviptech@gmail.com';
 
 class SettingsScreen extends StatefulWidget {
@@ -15,6 +27,31 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController alertCtl = TextEditingController(text: app.alertBelow.toStringAsFixed(3));
+  bool seeding = false;
+  String? seedMsg;
+
+  Future<void> addTestPrices() async {
+    setState(() {
+      seeding = true;
+      seedMsg = null;
+    });
+    var ok = 0;
+    String? err;
+    for (final t in _testStations) {
+      try {
+        await app.api.report(lat: t.$2, lon: t.$3, petrol: t.$4, diesel: t.$5, stationName: t.$1);
+        ok++;
+      } catch (e) {
+        err = e.toString();
+      }
+    }
+    await app.refresh();
+    if (!mounted) return;
+    setState(() {
+      seeding = false;
+      seedMsg = err == null ? 'Added $ok test stations around Dublin.' : 'Added $ok of 5. Problem: $err';
+    });
+  }
 
   @override
   void dispose() {
@@ -113,6 +150,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
             ]),
           ),
+          if (isTestBuild) ...[
+            const SizedBox(height: 16),
+            const Text('TEST BUILD', style: capsStyle),
+            const SizedBox(height: 8),
+            Card2(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text(
+                  'Adds 5 stations named "TEST station" around Dublin with sample prices, so you can try the map and lists. '
+                  'This button is not in the Google Play version.',
+                  style: TextStyle(color: muted, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                FilledButton(
+                  onPressed: seeding ? null : addTestPrices,
+                  child: Text(seeding ? 'Adding…' : 'Add test prices'),
+                ),
+                if (seedMsg != null) ...[
+                  const SizedBox(height: 8),
+                  Text(seedMsg!, style: const TextStyle(color: muted)),
+                ],
+              ]),
+            ),
+          ],
           const SizedBox(height: 16),
           const Text('ABOUT', style: capsStyle),
           const SizedBox(height: 8),
