@@ -58,10 +58,13 @@ jobs:
         run: |
           set -o pipefail
           report() {
-            # GitHub keeps only 10 annotations per type, so send each block as ONE multi-line annotation
-            msg=$( { grep -A12 "What went wrong" "$1"; echo "-----"; grep -E "^e: |error:|Error:" "$1" | grep -v "Recompile" | head -30; } | head -80 )
-            msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"
-            echo "::error title=Build error::${msg}"
+            # Save the full log to the ci-logs branch so it can be read with git
+            cp "$1" "$RUNNER_TEMP/build.log"
+            git config user.name ci && git config user.email ci@users.noreply.github.com
+            git checkout --orphan ci-logs >/dev/null 2>&1
+            git rm -rfq . >/dev/null 2>&1 || true
+            cp "$RUNNER_TEMP/build.log" build.log
+            git add build.log && git commit -qm "build ${{ github.run_number }} log" && git push -qf origin ci-logs
           }
           flutter build apk --release --build-number=${{ github.run_number }} 2>&1 | tee apk.log || { report apk.log; exit 1; }
           flutter build appbundle --release --build-number=${{ github.run_number }} 2>&1 | tee aab.log || { report aab.log; exit 1; }
