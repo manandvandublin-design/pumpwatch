@@ -182,6 +182,23 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                     color: dc.readingNow ? _amber.withValues(alpha: 0.9) : null,
                   ),
                 ),
+              if (dc.usbMode && !dc.usbOpened && (dc.usbMessage != null || dc.problem != null))
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: _chip(
+                    Row(children: [
+                      Expanded(
+                        child: Text(dc.problem ?? 'USB camera: ${dc.usbMessage}',
+                            style: const TextStyle(color: Colors.white, fontSize: 15)),
+                      ),
+                      if (dc.problem != null)
+                        TextButton(onPressed: () => dc.setDriver(dc.driver), child: const Text('Retry')),
+                    ]),
+                    color: _amber.withValues(alpha: 0.95),
+                  ),
+                ),
               if (!compact && dc.note != null)
                 Positioned(
                   left: 16,

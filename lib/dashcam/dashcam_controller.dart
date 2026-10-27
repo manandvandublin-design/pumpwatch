@@ -230,7 +230,7 @@ class DashcamController extends ChangeNotifier {
     // The screen shows the USB camera view, which opens the camera. If nothing
     // happens in 15 seconds, the USB camera isn't there (or wasn't allowed).
     _usbWatchdog?.cancel();
-    _usbWatchdog = Timer(const Duration(seconds: 15), () {
+    _usbWatchdog = Timer(const Duration(seconds: 40), () {
       if (!usbOpened) _usbFailed('The USB camera did not open. Allow USB access if the radio asked.');
     });
     notifyListeners();
@@ -248,23 +248,30 @@ class DashcamController extends ChangeNotifier {
 
   Future<void> _usbFailed(String why) async {
     _usbWatchdog?.cancel();
-    if (why.toLowerCase().contains('permission') && _usbRetries < 2) {
+    // The USB library reports "Permission denied" while Android is still showing the
+    // Camera/Storage permission box. Give the driver time to tap Allow, then try again.
+    if (why.toLowerCase().contains('permission') && _usbRetries < 6) {
       _usbRetries++;
-      usbMessage = 'Waiting for USB permission… ($why)';
+      usbMessage = 'Waiting for permission… tap Allow if asked (try $_usbRetries of 6)';
       notifyListeners();
       await _closeUsb();
-      await Future.delayed(const Duration(seconds: 3));
+      usbMode = true; // keep showing the USB status while we wait
+      notifyListeners();
+      await Future.delayed(const Duration(seconds: 5));
       _startUsb();
       return;
     }
-    if (driver == 'auto') {
-      // Auto: fall back to the normal Android camera.
+    _usbRetries = 0;
+    final noDevice = why.toLowerCase().contains('no device') || why.toLowerCase().contains('did not open');
+    if (driver == 'auto' && noDevice) {
+      // Auto: no USB camera, so fall back to the normal Android camera.
       _autoUsbFailed = true;
       await _closeUsb();
       await start();
       return;
     }
-    problem = 'USB camera: $why\nTry: Dashcam settings > Camera driver, or USB picture format YUV.';
+    usbMessage = why;
+    problem = 'USB camera: $why\nTry: unplug and replug the dashcam, then tap Retry. If the picture stays black, set USB picture format to YUV.';
     notifyListeners();
   }
 
