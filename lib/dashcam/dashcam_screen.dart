@@ -8,6 +8,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../state.dart';
 import 'dashcam_controller.dart';
+import 'usb_info.dart';
 
 const _bg = Color(0xFF0E0F10);
 const _panel = Color(0xFF17191B);
@@ -577,6 +578,18 @@ class _SettingsPage extends StatelessWidget {
                 ),
             ]),
             const SizedBox(height: 16),
+            section('USB DEVICES', [const _UsbList()]),
+            if (dc.usbLog.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              section('USB CAMERA LOG', [
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Text(dc.usbLog.join('\n'),
+                      style: const TextStyle(color: _muted, fontSize: 13, fontFamily: 'monospace')),
+                ),
+              ]),
+            ],
+            const SizedBox(height: 16),
             section('ANDROID CAMERAS', [
               for (final cam in dc.cameras)
                 RadioListTile<String>(
@@ -606,4 +619,65 @@ class _SettingsPage extends StatelessWidget {
         CameraLensDirection.back => 'Built-in (back)',
         CameraLensDirection.front => 'Built-in (front)',
       };
+}
+
+
+/// Every USB device the radio can see, with an Allow button.
+class _UsbList extends StatefulWidget {
+  const _UsbList();
+  @override
+  State<_UsbList> createState() => _UsbListState();
+}
+
+class _UsbListState extends State<_UsbList> {
+  List<UsbInfo>? devices;
+
+  Future<void> load() async {
+    final d = await listUsb();
+    if (mounted) setState(() => devices = d);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = devices;
+    return Column(children: [
+      if (d == null)
+        const ListTile(title: Text('Looking…', style: TextStyle(color: _muted)))
+      else if (d.isEmpty)
+        const ListTile(
+          title: Text('No USB devices visible to apps', style: TextStyle(color: Colors.white)),
+          subtitle: Text('The radio does not share its USB ports with apps, or nothing is plugged in.',
+              style: TextStyle(color: _muted)),
+        ),
+      for (final u in d ?? <UsbInfo>[])
+        ListTile(
+          title: Text(
+            '${u.isCamera ? 'USB camera' : 'USB device'}  ${u.product ?? ''} ${u.maker != null ? '(${u.maker})' : ''}'.trim(),
+            style: TextStyle(color: u.isCamera ? Colors.white : _muted, fontSize: 16),
+          ),
+          subtitle: Text(
+            'ID ${u.ids} · class ${u.deviceClass} · interfaces ${u.interfaceClasses.join(', ')}\n'
+            '${u.hasPermission ? 'PumpWatch has access' : 'No access yet'} · ${u.name}',
+            style: const TextStyle(color: _muted, fontSize: 13),
+          ),
+          trailing: u.hasPermission
+              ? const Icon(Icons.check_circle, color: _green)
+              : TextButton(
+                  onPressed: () async {
+                    await requestUsb(u.name);
+                    await Future.delayed(const Duration(seconds: 2));
+                    load();
+                  },
+                  child: const Text('Allow'),
+                ),
+        ),
+      TextButton.icon(onPressed: load, icon: const Icon(Icons.refresh), label: const Text('Refresh')),
+    ]);
+  }
 }

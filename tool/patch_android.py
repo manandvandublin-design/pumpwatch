@@ -50,6 +50,11 @@ xml_dir = root / "android/app/src/main/res/xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 _sh.copy(root / "tool/res/xml/device_filter.xml", xml_dir / "device_filter.xml")
 
+# MainActivity with the "pumpwatch/usb" helper channel
+_ma = root / "android/app/src/main/kotlin/app/viptech/pumpwatch/MainActivity.kt"
+assert _ma.exists(), "MainActivity.kt not where expected"
+_sh.copy(root / "tool/MainActivity.kt", _ma)
+
 # JitPack hosts the USB camera library
 top = root / "android/build.gradle.kts"
 t = top.read_text()

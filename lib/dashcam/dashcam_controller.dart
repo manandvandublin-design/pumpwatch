@@ -215,6 +215,7 @@ class DashcamController extends ChangeNotifier {
     usbMessage = null;
     final u = UVCCameraController();
     u.cameraStateCallback = (state) {
+      _log('State: ${state.name}');
       if (state == UVCCameraState.opened) {
         _onUsbOpened();
       } else if (state == UVCCameraState.error) {
@@ -223,6 +224,7 @@ class DashcamController extends ChangeNotifier {
     };
     u.msgCallback = (m) {
       usbMessage = m;
+      _log(m);
       notifyListeners();
     };
     uvc = u;
@@ -234,6 +236,14 @@ class DashcamController extends ChangeNotifier {
       if (!usbOpened) _usbFailed('The USB camera did not open. Allow USB access if the radio asked.');
     });
     notifyListeners();
+  }
+
+  /// Last USB camera messages, newest first (shown in Dashcam settings).
+  final List<String> usbLog = [];
+  void _log(String m) {
+    final t = DateTime.now();
+    usbLog.insert(0, '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}  $m');
+    if (usbLog.length > 15) usbLog.removeLast();
   }
 
   void _onUsbOpened() {
@@ -248,6 +258,7 @@ class DashcamController extends ChangeNotifier {
 
   Future<void> _usbFailed(String why) async {
     _usbWatchdog?.cancel();
+    _log('Failed: $why');
     // The USB library reports "Permission denied" while Android is still showing the
     // Camera/Storage permission box. Give the driver time to tap Allow, then try again.
     if (why.toLowerCase().contains('permission') && _usbRetries < 6) {
