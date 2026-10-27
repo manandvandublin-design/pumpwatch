@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Any USB video (UVC) camera: lets Android offer "Open PumpWatch" and remember the USB permission. -->
+<resources>
+    <usb-device class="239" subclass="2" />
+    <usb-device class="14" />
+</resources>

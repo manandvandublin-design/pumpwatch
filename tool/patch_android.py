@@ -25,7 +25,22 @@ m = re.sub(r'android:label="[^"]*"', 'android:label="PumpWatch"', m, count=1)
 if "supportsPictureInPicture" not in m:
     # floating window (picture-in-picture) for Dashcam mode
     m = m.replace("<activity", '<activity\n            android:supportsPictureInPicture="true"', 1)
+if "USB_DEVICE_ATTACHED" not in m:
+    # Offer "Open PumpWatch when this USB camera is connected" so Android remembers the USB permission
+    filt = """            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+"""
+    i = m.index("</activity>")
+    m = m[:i] + filt + "        " + m[i:]
 manifest.write_text(m)
+import shutil as _sh
+xml_dir = root / "android/app/src/main/res/xml"
+xml_dir.mkdir(parents=True, exist_ok=True)
+_sh.copy(root / "tool/res/xml/device_filter.xml", xml_dir / "device_filter.xml")
 
 # JitPack hosts the USB camera library
 top = root / "android/build.gradle.kts"
