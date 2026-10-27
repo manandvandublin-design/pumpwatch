@@ -34,6 +34,19 @@ if "jitpack.io" not in t:
     t = t.replace("mavenCentral()", 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
     top.write_text(t)
 assert "jitpack.io" in t, "jitpack not added"
+if "constraint-layout" not in t:
+    # flutter_uvc_camera asks for a misspelt "constraint-layout: 5.0.0"; use the real AndroidX package instead
+    t += """
+subprojects {
+    configurations.all {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("com.android.support.constraint:constraint-layout"))
+                .using(module("androidx.constraintlayout:constraintlayout:2.1.4"))
+        }
+    }
+}
+"""
+    top.write_text(t)
 settings = root / "android/settings.gradle.kts"
 st = settings.read_text()
 if "jitpack.io" not in st and "dependencyResolutionManagement" in st:
