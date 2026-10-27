@@ -28,10 +28,12 @@ Future<ReadPrices> readPricesFromPhoto(String path) async {
 final _dieselWords = RegExp(r'diesel|dsl|derv|\bd\b', caseSensitive: false);
 final _petrolWords = RegExp(r'petrol|unleaded|unl|\b95\b|e10|\bp\b', caseSensitive: false);
 // 1.719  1,719  1.71   or cents style 171.9  171,9  171·9
-final _priceRe = RegExp(r'(?<!\d)(1[.,·]\d{2,3}|[12]\d{2}[.,·]\d)(?!\d)');
+// Also LED signs where the dot is missed: 1799 -> 1.799, and "179 9" -> 179.9
+final _priceRe = RegExp(r'(?<!\d)(1[.,·]\d{2,3}|[12]\d{2}[.,· ]\d|1[5-9]\d{2})(?!\d)');
 
 double? _normalise(String s) {
-  final t = s.replaceAll(RegExp(r'[,·]'), '.');
+  var t = s.replaceAll(RegExp(r'[,· ]'), '.');
+  if (RegExp(r'^1[5-9]\d{2}$').hasMatch(t)) t = '1.${t.substring(1)}'; // 1799 -> 1.799
   final v = double.tryParse(t);
   if (v == null) return null;
   final euro = v >= 100 ? v / 100.0 : v; // 171.9 cent -> 1.719 euro

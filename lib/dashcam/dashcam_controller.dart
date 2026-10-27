@@ -26,6 +26,19 @@ class DashPrice {
   DashPrice(this.time, this.station, this.petrol, this.diesel, this.status);
 }
 
+/// What happened each time the van passed a filling station.
+class StationPass {
+  final String station;
+  final DateTime time;
+  int framesRead = 0;
+  int pricesSeen = 0;
+  String lastText = '';
+  int bestTextLen = -1;
+  String? photo;
+  String result = 'No prices found';
+  StationPass(this.station, this.time);
+}
+
 class Clip {
   final File file;
   final bool saved;
@@ -71,6 +84,10 @@ class DashcamController extends ChangeNotifier {
   bool readingNow = false;
   DashPrice? lastSaved;
   final List<DashPrice> today = [];
+  final List<StationPass> passes = [];
+  StationPass? _pass;
+  static const _native = MethodChannel('pumpwatch/usb');
+  Directory? _signsDir;
   int skipped = 0;
 
   late SharedPreferences _prefs;
@@ -103,6 +120,7 @@ class DashcamController extends ChangeNotifier {
     final base = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
     _loopDir = Directory('${base.path}/PumpWatchDVR/loop')..createSync(recursive: true);
     _savedDir = Directory('${base.path}/PumpWatchDVR/saved')..createSync(recursive: true);
+    _signsDir = Directory('${base.path}/PumpWatchDVR/signs')..createSync(recursive: true);
     stations = await StationIndex.load();
     _retryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _flushPending());
   }
@@ -396,7 +414,7 @@ class DashcamController extends ChangeNotifier {
     try {
       final String? path = c != null ? (await c.takePicture()).path : await u!.takePicture();
       if (path == null) throw Exception('no photo');
-      await _readInput(InputImage.fromFilePath(path));
+      await _readInput(InputImage.fromFilePath(path), photoPath: path);
       try {
         await File(path).delete();
       } catch (_) {}
@@ -543,11 +561,18 @@ class DashcamController extends ChangeNotifier {
       lon = p.longitude;
       speedKmh = (p.speed.isNaN || p.speed < 0) ? 0 : p.speed * 3.6;
       haveFix = true;
-      near = stations.all.isEmpty ? null : stations.nearest(lat, lon);
+      near = stations.all.isEmpty ? null : stations.nearest(lat, lon, maxMetres: 200);
       final key = near == null ? null : '${near!.$1.lat},${near!.$1.lon}';
       if (key != _visitKey) {
         _visitKey = key;
         _visitReads.clear();
+        if (near != null) {
+          _pass = StationPass(near!.$1.name, DateTime.now());
+          passes.insert(0, _pass!);
+          if (passes.length > 40) passes.removeLast();
+        } else {
+          _pass = null;
+        }
       }
       notifyListeners();
     });
@@ -582,22 +607,80 @@ class DashcamController extends ChangeNotifier {
       readingNow = false;
       return;
     }
-    await _readInput(input);
+    await _readInput(input, nv21: img.planes.length == 1 ? img : null);
   }
 
-  Future<void> _readInput(InputImage input) async {
+  Future<void> _readInput(InputImage input, {CameraImage? nv21, String? photoPath}) async {
     try {
       final result = await _recognizer.processImage(input);
       final lines = <String>[for (final b in result.blocks) for (final l in b.lines) l.text];
       final r = parsePriceLines(lines);
+      final pass = _pass;
+      if (pass != null) {
+        pass.framesRead++;
+        if (lines.isNotEmpty) pass.lastText = lines.join(' | ');
+        final hasPrice = r.petrol != null || r.diesel != null;
+        if (hasPrice) pass.pricesSeen++;
+        // Keep one photo per station: the frame with a price, or else the one with most text.
+        final score = (hasPrice ? 100000 : 0) + result.text.length;
+        if (score > pass.bestTextLen) {
+          pass.bestTextLen = score;
+          await _keepSignPhoto(pass, input, nv21: nv21, photoPath: photoPath);
+        }
+        if (hasPrice && pass.result == 'No prices found') {
+          pass.result = 'Price seen once, waiting to confirm';
+        }
+      }
       if (r.petrol == null && r.diesel == null) return;
       _visitReads.add(r);
       final agreed = _agreement();
-      if (agreed != null) await _savePrice(agreed);
+      if (agreed != null) {
+        pass?.result = 'Saved: P ${r.petrol ?? '-'}  D ${r.diesel ?? '-'}';
+        await _savePrice(agreed);
+      }
     } catch (_) {
     } finally {
       readingNow = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _keepSignPhoto(StationPass pass, InputImage input, {CameraImage? nv21, String? photoPath}) async {
+    final dir = _signsDir;
+    if (dir == null) return;
+    final t = pass.time;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final out = '${dir.path}/${t.year}${two(t.month)}${two(t.day)}_${two(t.hour)}${two(t.minute)}${two(t.second)}.jpg';
+    try {
+      if (photoPath != null) {
+        await File(photoPath).copy(out);
+      } else if (nv21 != null) {
+        final m = input.metadata!;
+        final ok = await _native.invokeMethod<bool>('nv21ToJpeg', {
+          'bytes': input.bytes,
+          'width': nv21.width,
+          'height': nv21.height,
+          'rotation': m.rotation.rawValue,
+          'path': out,
+        });
+        if (ok != true) return;
+      } else {
+        return;
+      }
+      pass.photo = out;
+      _trimSigns();
+    } catch (_) {}
+  }
+
+  void _trimSigns() {
+    final dir = _signsDir;
+    if (dir == null) return;
+    final files = dir.listSync().whereType<File>().toList()
+      ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    for (final f in files.skip(300)) {
+      try {
+        f.deleteSync();
+      } catch (_) {}
     }
   }
 
@@ -683,12 +766,27 @@ class DashcamController extends ChangeNotifier {
       bytes: bytes,
       metadata: InputImageMetadata(
         size: Size(img.width.toDouble(), img.height.toDouble()),
-        rotation: InputImageRotationValue.fromRawValue(c.description.sensorOrientation) ??
-            InputImageRotation.rotation0deg,
+        rotation: _rotation(c),
         format: InputImageFormatValue.fromRawValue(img.format.raw as int) ?? InputImageFormat.nv21,
         bytesPerRow: img.planes.first.bytesPerRow,
       ),
     );
+  }
+
+  /// How far the picture must be turned to be upright, taking into account
+  /// that the dashcam screen is in landscape (the old code ignored this, so
+  /// on phones the text reader got sideways pictures and found nothing).
+  InputImageRotation _rotation(CameraController c) {
+    final sensor = c.description.sensorOrientation;
+    final dev = switch (c.value.deviceOrientation) {
+      DeviceOrientation.portraitUp => 0,
+      DeviceOrientation.landscapeLeft => 90,
+      DeviceOrientation.portraitDown => 180,
+      DeviceOrientation.landscapeRight => 270,
+    };
+    final front = c.description.lensDirection == CameraLensDirection.front;
+    final deg = front ? (sensor + dev) % 360 : (sensor - dev + 360) % 360;
+    return InputImageRotationValue.fromRawValue(deg) ?? InputImageRotation.rotation0deg;
   }
 
   @override

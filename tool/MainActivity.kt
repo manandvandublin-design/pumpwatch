@@ -4,7 +4,15 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.os.Build
+import java.io.ByteArrayOutputStream
+import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -48,6 +56,38 @@ class MainActivity : FlutterActivity() {
                         )
                         usb.requestPermission(d, pi)
                         result.success(usb.hasPermission(d))
+                    }
+                }
+                "nv21ToJpeg" -> {
+                    // Saves one camera frame as a JPEG "sign photo" (runs off the UI thread).
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val w = call.argument<Int>("width") ?: 0
+                    val h = call.argument<Int>("height") ?: 0
+                    val rot = call.argument<Int>("rotation") ?: 0
+                    val path = call.argument<String>("path")
+                    if (bytes == null || path == null || w <= 0 || h <= 0 || bytes.size < w * h * 3 / 2) {
+                        result.success(false)
+                    } else {
+                        Thread {
+                            val ok = try {
+                                val out = ByteArrayOutputStream()
+                                YuvImage(bytes, ImageFormat.NV21, w, h, null).compressToJpeg(Rect(0, 0, w, h), 80, out)
+                                var jpg = out.toByteArray()
+                                if (rot != 0) {
+                                    val bmp = BitmapFactory.decodeByteArray(jpg, 0, jpg.size)
+                                    val m = Matrix().apply { postRotate(rot.toFloat()) }
+                                    val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                                    val o2 = ByteArrayOutputStream()
+                                    r.compress(Bitmap.CompressFormat.JPEG, 80, o2)
+                                    jpg = o2.toByteArray()
+                                }
+                                File(path).writeBytes(jpg)
+                                true
+                            } catch (e: Exception) {
+                                false
+                            }
+                            runOnUiThread { result.success(ok) }
+                        }.start()
                     }
                 }
                 else -> result.notImplemented()

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:camera/camera.dart';
@@ -307,6 +308,8 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                 const SizedBox(width: 8),
                 _nav('Prices', () => _open(_PricesPage(dc))),
                 const SizedBox(width: 8),
+                _nav('Stations', () => _open(_PassesPage(dc))),
+                const SizedBox(width: 8),
                 _nav('Settings', () => _open(_SettingsPage(dc))),
               ]),
             ]),
@@ -467,6 +470,85 @@ class _PricesPage extends StatelessWidget {
                           child: Text('D ${_p(e.diesel)}',
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700))),
                       SizedBox(width: 170, child: Text(label, style: TextStyle(color: color))),
+                    ]),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+/// Each filling station passed: how many pictures were read, what text was
+/// seen, the best photo of the sign and whether a price was saved.
+class _PassesPage extends StatelessWidget {
+  final DashcamController dc;
+  const _PassesPage(this.dc);
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: dc,
+      builder: (context, _) => _DarkPage(
+        'Stations passed',
+        dc.passes.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    dc.haveFix
+                        ? 'No station passed yet. Stations appear here when you come within about 200 m of one.'
+                        : 'Waiting for GPS. Stations appear here when you come within about 200 m of one.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: _muted, fontSize: 16),
+                  ),
+                ),
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: dc.passes.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, i) {
+                  final ps = dc.passes[i];
+                  final photo = ps.photo;
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(12)),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      GestureDetector(
+                        onTap: photo == null
+                            ? null
+                            : () => Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => _DarkPage(ps.station,
+                                    InteractiveViewer(child: Center(child: Image.file(File(photo))))))),
+                        child: Container(
+                          width: 160,
+                          height: 90,
+                          decoration: BoxDecoration(color: _card, borderRadius: BorderRadius.circular(8)),
+                          child: photo == null
+                              ? const Center(child: Text('No photo', style: TextStyle(color: _muted)))
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.file(File(photo), fit: BoxFit.cover, gaplessPlayback: true)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${_hm(ps.time)}  ${ps.station}',
+                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text(ps.result,
+                              style: TextStyle(
+                                  color: ps.result.startsWith('Saved') ? const Color(0xFF7FD1A4) : _amber,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('Pictures read: ${ps.framesRead}   With a price: ${ps.pricesSeen}',
+                              style: const TextStyle(color: _muted)),
+                          if (ps.lastText.isNotEmpty)
+                            Text('Text seen: ${ps.lastText}',
+                                maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted)),
+                        ]),
+                      ),
                     ]),
                   );
                 },
