@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -30,6 +32,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
   final dc = DashcamController();
   bool ready = false;
   DashPrice? shown;
+  Timer? _tick;
 
   @override
   void initState() {
@@ -38,6 +41,9 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
     DashcamController.landscape();
     WakelockPlus.enable();
     dc.addListener(_onChange);
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
     () async {
       await dc.init();
       if (!mounted) return;
@@ -66,6 +72,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _tick?.cancel();
     dc.removeListener(_onChange);
     dc.stop().whenComplete(dc.dispose);
     WakelockPlus.disable();

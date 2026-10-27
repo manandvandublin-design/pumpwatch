@@ -153,25 +153,64 @@ class DashcamController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How frames reach the price reader on this camera.
+  String readMode = 'stream'; // stream | photo | streamOnly
+  Timer? _photoTimer;
+
   Future<void> _beginClip() async {
     final c = camera;
     if (c == null) return;
+    _photoTimer?.cancel();
+    note = null;
+    // 1) Record and stream frames together (best).
     try {
       await c.startVideoRecording(onAvailable: _onFrame);
       recording = true;
-      note = null;
-    } catch (e) {
-      // Some radios can't record and stream at once: keep reading prices at least.
-      recording = false;
-      note = 'Recording is not supported on this camera. Price reading still works.';
+      readMode = 'stream';
+    } catch (e1) {
+      // 2) Many phones/radios can't do both: record, and read prices from still photos.
       try {
-        if (!c.value.isStreamingImages) await c.startImageStream(_onFrame);
+        if (c.value.isStreamingImages) await c.stopImageStream();
       } catch (_) {}
+      try {
+        await c.startVideoRecording();
+        recording = true;
+        readMode = 'photo';
+        _photoTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _photoTick());
+      } catch (e2) {
+        // 3) Recording not possible at all: at least keep reading prices.
+        recording = false;
+        readMode = 'streamOnly';
+        note = 'Recording failed on this camera: $e2';
+        try {
+          if (!c.value.isStreamingImages) await c.startImageStream(_onFrame);
+        } catch (_) {}
+      }
     }
     recordingSince = DateTime.now();
     _clipTimer?.cancel();
     _clipTimer = Timer(Duration(minutes: clipMinutes), () => rotate());
     notifyListeners();
+  }
+
+  Future<void> _photoTick() async {
+    final c = camera;
+    if (c == null || _busy || _rotating || !_shouldRead || c.value.isTakingPicture) return;
+    _busy = true;
+    readingNow = true;
+    notifyListeners();
+    try {
+      final pic = await c.takePicture();
+      await _readInput(InputImage.fromFilePath(pic.path));
+      try {
+        await File(pic.path).delete();
+      } catch (_) {}
+    } catch (_) {
+      readingNow = false;
+      notifyListeners();
+    } finally {
+      _busy = false;
+    }
   }
 
   /// Ends the current clip and starts a new one. With [save], the clip is kept
@@ -250,6 +289,7 @@ class DashcamController extends ChangeNotifier {
 
   Future<void> stop() async {
     _clipTimer?.cancel();
+    _photoTimer?.cancel();
     await _gps?.cancel();
     _gps = null;
     final c = camera;
@@ -323,7 +363,14 @@ class DashcamController extends ChangeNotifier {
 
   Future<void> _read(CameraImage img) async {
     final input = _toInputImage(img);
-    if (input == null) return;
+    if (input == null) {
+      readingNow = false;
+      return;
+    }
+    await _readInput(input);
+  }
+
+  Future<void> _readInput(InputImage input) async {
     try {
       final result = await _recognizer.processImage(input);
       final lines = <String>[for (final b in result.blocks) for (final l in b.lines) l.text];
@@ -433,6 +480,7 @@ class DashcamController extends ChangeNotifier {
   void dispose() {
     _retryTimer?.cancel();
     _clipTimer?.cancel();
+    _photoTimer?.cancel();
     _gps?.cancel();
     _recognizer.close();
     camera?.dispose();
