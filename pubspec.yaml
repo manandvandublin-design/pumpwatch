@@ -24,6 +24,7 @@ dependencies:
   wakelock_plus: any
   floating: any
   flutter_uvc_camera: any
+  permission_handler: any
 
 dev_dependencies:
   flutter_launcher_icons: any

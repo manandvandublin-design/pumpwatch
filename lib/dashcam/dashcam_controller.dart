@@ -10,6 +10,7 @@ import 'package:flutter_uvc_camera/flutter_uvc_camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ocr.dart';
@@ -140,6 +141,17 @@ class DashcamController extends ChangeNotifier {
     } catch (e) {
       cameras = [];
     }
+    // Android 10 only lets an app open a USB camera if it also holds the Camera permission.
+    try {
+      final cam = await Permission.camera.request();
+      if (recordSound) await Permission.microphone.request();
+      if (!cam.isGranted) {
+        problem = 'Camera permission is off. Allow it in Settings > Apps > PumpWatch > Permissions, then tap Retry.';
+        _starting = false;
+        notifyListeners();
+        return;
+      }
+    } catch (_) {}
     final hasExternal = cameras.any((c) => c.lensDirection == CameraLensDirection.external);
     if (driver == 'usb' || (driver == 'auto' && !hasExternal && !_autoUsbFailed)) {
       _startUsb();
@@ -224,8 +236,19 @@ class DashcamController extends ChangeNotifier {
     _beginUsbClip();
   }
 
+  int _usbRetries = 0;
+
   Future<void> _usbFailed(String why) async {
     _usbWatchdog?.cancel();
+    if (why.toLowerCase().contains('permission') && _usbRetries < 2) {
+      _usbRetries++;
+      usbMessage = 'Waiting for USB permission… ($why)';
+      notifyListeners();
+      await _closeUsb();
+      await Future.delayed(const Duration(seconds: 3));
+      _startUsb();
+      return;
+    }
     if (driver == 'auto') {
       // Auto: fall back to the normal Android camera.
       _autoUsbFailed = true;
