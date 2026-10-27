@@ -6,6 +6,7 @@ import 'dart:ui' show Size;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_uvc_camera/flutter_uvc_camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
@@ -42,8 +43,21 @@ class DashcamController extends ChangeNotifier {
   bool readPrices = true;
   bool recordSound = false;
   String? cameraName;
+  /// Camera driver: auto | android | usb
+  String driver = 'auto';
+  /// USB picture format: 1 = MJPEG (default), 0 = YUV (try if the picture is black)
+  int usbFormat = 1;
+  /// Off = read prices only (for dashcams that record to their own memory card).
+  bool recordVideo = true;
 
   // ---- live state ----
+  /// Direct USB (UVC) camera, used when the radio hides the dashcam from normal apps.
+  UVCCameraController? uvc;
+  bool usbMode = false, usbOpened = false;
+  String? usbMessage;
+  bool _autoUsbFailed = false;
+  Future<String?>? _uvcRec;
+  Timer? _usbWatchdog;
   List<CameraDescription> cameras = [];
   CameraController? camera;
   bool recording = false;
@@ -78,6 +92,9 @@ class DashcamController extends ChangeNotifier {
     readPrices = _prefs.getBool('dc_readPrices') ?? true;
     recordSound = _prefs.getBool('dc_sound') ?? false;
     cameraName = _prefs.getString('dc_camera');
+    driver = _prefs.getString('dc_driver') ?? 'auto';
+    usbFormat = _prefs.getInt('dc_usbFormat') ?? 1;
+    recordVideo = _prefs.getBool('dc_record') ?? true;
     try {
       final p = _prefs.getString('dc_pending');
       if (p != null) _pending.addAll((jsonDecode(p) as List).cast<Map<String, dynamic>>());
@@ -95,6 +112,9 @@ class DashcamController extends ChangeNotifier {
     await _prefs.setBool('dc_readPrices', readPrices);
     await _prefs.setBool('dc_sound', recordSound);
     if (cameraName != null) await _prefs.setString('dc_camera', cameraName!);
+    await _prefs.setString('dc_driver', driver);
+    await _prefs.setInt('dc_usbFormat', usbFormat);
+    await _prefs.setBool('dc_record', recordVideo);
     notifyListeners();
   }
 
@@ -102,8 +122,16 @@ class DashcamController extends ChangeNotifier {
 
   // ---------------- camera ----------------
 
+  Future<void> setDriver(String d) async {
+    driver = d;
+    _autoUsbFailed = false;
+    await saveSettings();
+    await stop();
+    await start();
+  }
+
   Future<void> start() async {
-    if (_starting || camera != null) return;
+    if (_starting || camera != null || uvc != null) return;
     _starting = true;
     problem = null;
     notifyListeners();
@@ -111,6 +139,12 @@ class DashcamController extends ChangeNotifier {
       cameras = await availableCameras();
     } catch (e) {
       cameras = [];
+    }
+    final hasExternal = cameras.any((c) => c.lensDirection == CameraLensDirection.external);
+    if (driver == 'usb' || (driver == 'auto' && !hasExternal && !_autoUsbFailed)) {
+      _startUsb();
+      _starting = false;
+      return;
     }
     if (cameras.isEmpty) {
       problem = 'No camera found. Check the USB dashcam is plugged in, then tap Retry.';
@@ -153,6 +187,106 @@ class DashcamController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---------------- direct USB (UVC) driver ----------------
+
+  void _startUsb() {
+    usbMode = true;
+    usbOpened = false;
+    usbMessage = null;
+    final u = UVCCameraController();
+    u.cameraStateCallback = (state) {
+      if (state == UVCCameraState.opened) {
+        _onUsbOpened();
+      } else if (state == UVCCameraState.error) {
+        _usbFailed(u.getCameraErrorMsg);
+      }
+    };
+    u.msgCallback = (m) {
+      usbMessage = m;
+      notifyListeners();
+    };
+    uvc = u;
+    _startGps();
+    // The screen shows the USB camera view, which opens the camera. If nothing
+    // happens in 15 seconds, the USB camera isn't there (or wasn't allowed).
+    _usbWatchdog?.cancel();
+    _usbWatchdog = Timer(const Duration(seconds: 15), () {
+      if (!usbOpened) _usbFailed('The USB camera did not open. Allow USB access if the radio asked.');
+    });
+    notifyListeners();
+  }
+
+  void _onUsbOpened() {
+    if (usbOpened) return;
+    usbOpened = true;
+    _usbWatchdog?.cancel();
+    problem = null;
+    _beginUsbClip();
+  }
+
+  Future<void> _usbFailed(String why) async {
+    _usbWatchdog?.cancel();
+    if (driver == 'auto') {
+      // Auto: fall back to the normal Android camera.
+      _autoUsbFailed = true;
+      await _closeUsb();
+      await start();
+      return;
+    }
+    problem = 'USB camera: $why\nTry: Dashcam settings > Camera driver, or USB picture format YUV.';
+    notifyListeners();
+  }
+
+  void _beginUsbClip() {
+    final u = uvc;
+    if (u == null) return;
+    _photoTimer?.cancel();
+    if (recordVideo) {
+      _uvcRec = u.captureVideo().catchError((_) => null);
+      recording = true;
+    } else {
+      _uvcRec = null;
+      recording = false;
+    }
+    readMode = 'photo';
+    note = null;
+    recordingSince = DateTime.now();
+    _photoTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _photoTick());
+    _clipTimer?.cancel();
+    _clipTimer = Timer(Duration(minutes: clipMinutes), () => rotate());
+    notifyListeners();
+  }
+
+  /// Stops the USB recording and returns the saved file path.
+  Future<String?> _stopUsbClip() async {
+    final u = uvc, f = _uvcRec;
+    if (u == null || f == null || !recording) return null;
+    // A second captureVideo() call stops recording; the first call's result is the file.
+    unawaited(u.captureVideo().catchError((_) => null));
+    recording = false;
+    try {
+      return await f.timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _closeUsb() async {
+    _photoTimer?.cancel();
+    _clipTimer?.cancel();
+    final path = await _stopUsbClip();
+    if (path != null) await _storePath(path, save: false);
+    try {
+      uvc?.closeCamera();
+      uvc?.dispose();
+    } catch (_) {}
+    uvc = null;
+    usbMode = false;
+    usbOpened = false;
+    _uvcRec = null;
+    notifyListeners();
+  }
+
   /// How frames reach the price reader on this camera.
   String readMode = 'stream'; // stream | photo | streamOnly
   Timer? _photoTimer;
@@ -162,6 +296,15 @@ class DashcamController extends ChangeNotifier {
     if (c == null) return;
     _photoTimer?.cancel();
     note = null;
+    if (!recordVideo) {
+      recording = false;
+      readMode = 'streamOnly';
+      try {
+        if (!c.value.isStreamingImages) await c.startImageStream(_onFrame);
+      } catch (_) {}
+      notifyListeners();
+      return;
+    }
     // 1) Record and stream frames together (best).
     try {
       await c.startVideoRecording(onAvailable: _onFrame);
@@ -194,16 +337,19 @@ class DashcamController extends ChangeNotifier {
   }
 
   Future<void> _photoTick() async {
-    final c = camera;
-    if (c == null || _busy || _rotating || !_shouldRead || c.value.isTakingPicture) return;
+    if (_busy || _rotating || !_shouldRead) return;
+    final c = camera, u = uvc;
+    if (c == null && u == null) return;
+    if (c != null && c.value.isTakingPicture) return;
     _busy = true;
     readingNow = true;
     notifyListeners();
     try {
-      final pic = await c.takePicture();
-      await _readInput(InputImage.fromFilePath(pic.path));
+      final String? path = c != null ? (await c.takePicture()).path : await u!.takePicture();
+      if (path == null) throw Exception('no photo');
+      await _readInput(InputImage.fromFilePath(path));
       try {
-        await File(pic.path).delete();
+        await File(path).delete();
       } catch (_) {}
     } catch (_) {
       readingNow = false;
@@ -216,6 +362,17 @@ class DashcamController extends ChangeNotifier {
   /// Ends the current clip and starts a new one. With [save], the clip is kept
   /// in the "saved" folder so loop recording never deletes it.
   Future<void> rotate({bool save = false}) async {
+    if (usbMode) {
+      if (uvc == null || _rotating) return;
+      _rotating = true;
+      final path = await _stopUsbClip();
+      if (path != null) await _storePath(path, save: save);
+      await Future.delayed(const Duration(milliseconds: 500));
+      _beginUsbClip();
+      _rotating = false;
+      _trimStorage();
+      return;
+    }
     final c = camera;
     if (c == null || _rotating) return;
     _rotating = true;
@@ -231,12 +388,14 @@ class DashcamController extends ChangeNotifier {
     _trimStorage();
   }
 
-  Future<void> _store(XFile x, {required bool save}) async {
+  Future<void> _store(XFile x, {required bool save}) => _storePath(x.path, save: save);
+
+  Future<void> _storePath(String path, {required bool save}) async {
     final dir = save ? _savedDir! : _loopDir!;
     final t = recordingSince ?? DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
     final name = '${t.year}${two(t.month)}${two(t.day)}_${two(t.hour)}${two(t.minute)}${two(t.second)}.mp4';
-    final src = File(x.path);
+    final src = File(path);
     try {
       await src.copy('${dir.path}/$name');
       await src.delete();
@@ -288,6 +447,13 @@ class DashcamController extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _usbWatchdog?.cancel();
+    if (usbMode) {
+      await _gps?.cancel();
+      _gps = null;
+      await _closeUsb();
+      return;
+    }
     _clipTimer?.cancel();
     _photoTimer?.cancel();
     await _gps?.cancel();
@@ -481,6 +647,7 @@ class DashcamController extends ChangeNotifier {
     _retryTimer?.cancel();
     _clipTimer?.cancel();
     _photoTimer?.cancel();
+    _usbWatchdog?.cancel();
     _gps?.cancel();
     _recognizer.close();
     camera?.dispose();

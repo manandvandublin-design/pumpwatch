@@ -23,6 +23,7 @@ dependencies:
   path_provider: any
   wakelock_plus: any
   floating: any
+  flutter_uvc_camera: any
 
 dev_dependencies:
   flutter_launcher_icons: any

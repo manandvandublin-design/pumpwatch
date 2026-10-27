@@ -27,6 +27,19 @@ if "supportsPictureInPicture" not in m:
     m = m.replace("<activity", '<activity\n            android:supportsPictureInPicture="true"', 1)
 manifest.write_text(m)
 
+# JitPack hosts the USB camera library
+top = root / "android/build.gradle.kts"
+t = top.read_text()
+if "jitpack.io" not in t:
+    t = t.replace("mavenCentral()", 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
+    top.write_text(t)
+assert "jitpack.io" in t, "jitpack not added"
+settings = root / "android/settings.gradle.kts"
+st = settings.read_text()
+if "jitpack.io" not in st and "dependencyResolutionManagement" in st:
+    st = st.replace("mavenCentral()", 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
+    settings.write_text(st)
+
 gradle = root / "android/app/build.gradle.kts"
 g = gradle.read_text()
 g = re.sub(r"minSdk\s*=\s*flutter\.minSdkVersion", "minSdk = 24", g)

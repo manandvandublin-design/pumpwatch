@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:floating/floating.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_uvc_camera/flutter_uvc_camera.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../state.dart';
@@ -106,65 +107,40 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
     }
   }
 
-  /// Small view shown inside the floating window: camera + REC only.
-  Widget _floatingView() {
-    final c = dc.camera;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(fit: StackFit.expand, children: [
-        if (c != null && c.value.isInitialized)
-          FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(width: 160 * c.value.aspectRatio, height: 160, child: CameraPreview(c)),
-          ),
-        Positioned(
-          left: 6,
-          top: 6,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(10)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(color: dc.recording ? _red : _muted, shape: BoxShape.circle)),
-              const SizedBox(width: 5),
-              Text(dc.recording ? 'REC' : 'OFF', style: const TextStyle(color: Colors.white, fontSize: 11)),
-              const SizedBox(width: 6),
-              Text('${dc.today.length} prices', style: const TextStyle(color: _amber, fontSize: 11)),
-            ]),
-          ),
-        ),
-      ]),
-    );
-  }
-
   @override
-  Widget build(BuildContext context) {
-    return PiPSwitcher(
-      childWhenEnabled: _floatingView(),
-      childWhenDisabled: _fullView(context),
-    );
-  }
+  Widget build(BuildContext context) => _fullView(context);
 
   Widget _fullView(BuildContext context) {
     final c = dc.camera;
     final (used, limit) = ready ? dc.storage() : (0, 1);
-    return Scaffold(
+    // In the floating window the screen is tiny: show just the camera and REC.
+    final compact = MediaQuery.sizeOf(context).width < 500;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.0)),
+      child: Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
         child: Row(children: [
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
               Container(color: const Color(0xFF2A2D30)),
-              if (c != null && c.value.isInitialized)
+              if (dc.usbMode && dc.uvc != null)
+                LayoutBuilder(
+                  builder: (_, box) => UVCCameraView(
+                    cameraController: dc.uvc!,
+                    width: box.maxWidth,
+                    height: box.maxHeight,
+                    params: UVCCameraViewParamsEntity(frameFormat: dc.usbFormat),
+                  ),
+                )
+              else if (c != null && c.value.isInitialized)
                 Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: CameraPreview(c)))
               else
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(dc.problem ?? 'Starting camera…',
+                      Text(dc.problem ?? (dc.usbMode ? 'Opening USB camera…' : 'Starting camera…'),
                           textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 18)),
                       if (dc.problem != null) ...[
                         const SizedBox(height: 16),
@@ -194,7 +170,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                   _chip(Text('${dc.speedKmh.round()} km/h', style: const TextStyle(color: Colors.white, fontSize: 15))),
                 ]),
               ),
-              if (dc.readingNow || dc.near != null)
+              if (!compact && (dc.readingNow || dc.near != null))
                 Positioned(
                   right: 16,
                   top: 16,
@@ -206,14 +182,14 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                     color: dc.readingNow ? _amber.withValues(alpha: 0.9) : null,
                   ),
                 ),
-              if (dc.note != null)
+              if (!compact && dc.note != null)
                 Positioned(
                   left: 16,
                   top: 64,
                   right: 16,
                   child: _chip(Text(dc.note!, style: const TextStyle(color: Colors.white, fontSize: 14))),
                 ),
-              if (shown != null)
+              if (!compact && shown != null)
                 Positioned(
                   left: 16,
                   bottom: 16,
@@ -233,8 +209,9 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                 ),
             ]),
           ),
+          if (!compact)
           Container(
-            width: 260,
+            width: 300,
             color: _panel,
             padding: const EdgeInsets.all(12),
             child: SingleChildScrollView(
@@ -303,7 +280,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                   ),
                   onPressed: _goFloating,
                   icon: const Icon(Icons.picture_in_picture_alt_outlined),
-                  label: const Text('Floating window'),
+                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Floating window')),
                 ),
               ),
               const SizedBox(height: 10),
@@ -319,6 +296,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
           ),
         ]),
       ),
+    ),
     );
   }
 
@@ -344,7 +322,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: onTap,
-            child: Text(label, style: const TextStyle(fontSize: 13)),
+            child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: const TextStyle(fontSize: 14))),
           ),
         ),
       );
@@ -525,6 +503,10 @@ class _SettingsPage extends StatelessWidget {
                 dc.storageLimitGb = v;
                 dc.saveSettings();
               }),
+              sw('Record video in PumpWatch', dc.recordVideo, (v) {
+                dc.recordVideo = v;
+                dc.setDriver(dc.driver);
+              }),
               sw('Record sound (applies next start)', dc.recordSound, (v) {
                 dc.recordSound = v;
                 dc.saveSettings();
@@ -542,7 +524,43 @@ class _SettingsPage extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 16),
-            section('CAMERA', [
+            section('CAMERA DRIVER', [
+              for (final (key, title, sub) in const [
+                ('auto', 'Auto', 'Tries direct USB first, then the Android camera'),
+                ('usb', 'Direct USB (UVC)', 'For USB dashcams the radio keeps for its own recorder app'),
+                ('android', 'Android camera', 'Cameras the radio shares with apps (list below)'),
+              ])
+                RadioListTile<String>(
+                  value: key,
+                  groupValue: dc.driver,
+                  activeColor: _green,
+                  onChanged: (v) => v == null ? null : dc.setDriver(v),
+                  title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 17)),
+                  subtitle: Text(sub, style: const TextStyle(color: _muted)),
+                ),
+              ListTile(
+                title: const Text('USB picture format', style: TextStyle(color: Colors.white, fontSize: 17)),
+                subtitle: const Text('If the USB picture is black, try YUV', style: TextStyle(color: _muted)),
+                trailing: Wrap(spacing: 6, children: [
+                  for (final (v, l) in const [(1, 'MJPEG'), (0, 'YUV')])
+                    ChoiceChip(
+                      label: Text(l),
+                      selected: dc.usbFormat == v,
+                      onSelected: (_) {
+                        dc.usbFormat = v;
+                        dc.setDriver(dc.driver);
+                      },
+                    ),
+                ]),
+              ),
+              if (dc.usbMessage != null)
+                ListTile(
+                  title: const Text('USB status', style: TextStyle(color: Colors.white)),
+                  subtitle: Text(dc.usbMessage!, style: const TextStyle(color: _muted)),
+                ),
+            ]),
+            const SizedBox(height: 16),
+            section('ANDROID CAMERAS', [
               for (final cam in dc.cameras)
                 RadioListTile<String>(
                   value: cam.name,
