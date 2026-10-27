@@ -19,6 +19,14 @@ perms = """    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
 """
+# The USB camera library insists on WRITE_EXTERNAL_STORAGE. Another plugin caps it at
+# Android 9 (maxSdkVersion=28), which makes it impossible to grant on Android 10 radios.
+if "xmlns:tools" not in m:
+    m = m.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+if "tools:remove=\"android:maxSdkVersion\"" not in m:
+    perms += """    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:remove="android:maxSdkVersion"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:remove="android:maxSdkVersion"/>
+"""
 if "ACCESS_FINE_LOCATION" not in m:
     m = m.replace("<application", perms + "    <application", 1)
 m = re.sub(r'android:label="[^"]*"', 'android:label="PumpWatch"', m, count=1)
