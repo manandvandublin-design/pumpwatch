@@ -172,8 +172,9 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
           Container(
             width: 260,
             color: _panel,
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            padding: const EdgeInsets.all(12),
+            child: SingleChildScrollView(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Row(children: [
                 const Expanded(
                     child: Text('PumpWatch',
@@ -209,9 +210,9 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                 Text('${_gb(used)} GB of ${dc.storageLimitGb} GB · loop on',
                     style: const TextStyle(color: _muted, fontSize: 13)),
               ]),
-              const Spacer(),
+              const SizedBox(height: 12),
               SizedBox(
-                height: 64,
+                height: 56,
                 child: FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: _red),
                   onPressed: dc.recording
@@ -235,6 +236,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                 _nav('Settings', () => _open(_SettingsPage(dc))),
               ]),
             ]),
+            ),
           ),
         ]),
       ),
