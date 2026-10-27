@@ -10,7 +10,6 @@ import 'package:flutter_uvc_camera/flutter_uvc_camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ocr.dart';
@@ -57,6 +56,7 @@ class DashcamController extends ChangeNotifier {
   bool usbMode = false, usbOpened = false;
   String? usbMessage;
   bool _autoUsbFailed = false;
+  bool _cameraPermissionChecked = false;
   Future<String?>? _uvcRec;
   Timer? _usbWatchdog;
   List<CameraDescription> cameras = [];
@@ -141,17 +141,25 @@ class DashcamController extends ChangeNotifier {
     } catch (e) {
       cameras = [];
     }
-    // Android 10 only lets an app open a USB camera if it also holds the Camera permission.
-    try {
-      final cam = await Permission.camera.request();
-      if (recordSound) await Permission.microphone.request();
-      if (!cam.isGranted) {
-        problem = 'Camera permission is off. Allow it in Settings > Apps > PumpWatch > Permissions, then tap Retry.';
-        _starting = false;
-        notifyListeners();
-        return;
+    // Android 10 only lets an app open a USB camera if it also holds the Camera
+    // permission. Opening any built-in camera for a moment makes Android ask for it.
+    if (!_cameraPermissionChecked && cameras.isNotEmpty) {
+      _cameraPermissionChecked = true;
+      final probe = CameraController(cameras.first, ResolutionPreset.low, enableAudio: recordSound);
+      try {
+        await probe.initialize();
+      } catch (e) {
+        if (e.toString().toLowerCase().contains('access')) {
+          problem = 'Camera permission is off. Allow it in Settings > Apps > PumpWatch > Permissions, then tap Retry.';
+          _cameraPermissionChecked = false;
+          await probe.dispose();
+          _starting = false;
+          notifyListeners();
+          return;
+        }
       }
-    } catch (_) {}
+      await probe.dispose();
+    }
     final hasExternal = cameras.any((c) => c.lensDirection == CameraLensDirection.external);
     if (driver == 'usb' || (driver == 'auto' && !hasExternal && !_autoUsbFailed)) {
       _startUsb();
