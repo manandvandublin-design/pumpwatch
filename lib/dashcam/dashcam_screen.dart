@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:camera/camera.dart';
+import 'package:floating/floating.dart';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -33,6 +34,7 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
   bool ready = false;
   DashPrice? shown;
   Timer? _tick;
+  final floating = Floating();
 
   @override
   void initState() {
@@ -49,6 +51,10 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() => ready = true);
       await dc.start();
+      // Go to a floating window automatically when the driver opens another app.
+      try {
+        await floating.enable(OnLeavePiP());
+      } catch (_) {}
     }();
   }
 
@@ -73,6 +79,9 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
+    try {
+      floating.cancelOnLeavePiP();
+    } catch (_) {}
     dc.removeListener(_onChange);
     dc.stop().whenComplete(dc.dispose);
     WakelockPlus.disable();
@@ -82,8 +91,63 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
 
   void _open(Widget page) => Navigator.push(context, MaterialPageRoute(builder: (_) => page));
 
+  Future<void> _goFloating() async {
+    try {
+      final status = await floating.enable(ImmediatePiP());
+      if (status != PiPStatus.enabled && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Floating window is not supported on this device.')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Floating window is not supported on this device.')));
+      }
+    }
+  }
+
+  /// Small view shown inside the floating window: camera + REC only.
+  Widget _floatingView() {
+    final c = dc.camera;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(fit: StackFit.expand, children: [
+        if (c != null && c.value.isInitialized)
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(width: 160 * c.value.aspectRatio, height: 160, child: CameraPreview(c)),
+          ),
+        Positioned(
+          left: 6,
+          top: 6,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(10)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: dc.recording ? _red : _muted, shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Text(dc.recording ? 'REC' : 'OFF', style: const TextStyle(color: Colors.white, fontSize: 11)),
+              const SizedBox(width: 6),
+              Text('${dc.today.length} prices', style: const TextStyle(color: _amber, fontSize: 11)),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PiPSwitcher(
+      childWhenEnabled: _floatingView(),
+      childWhenDisabled: _fullView(context),
+    );
+  }
+
+  Widget _fullView(BuildContext context) {
     final c = dc.camera;
     final (used, limit) = ready ? dc.storage() : (0, 1);
     return Scaffold(
@@ -225,6 +289,21 @@ class _DashcamScreenState extends State<DashcamScreen> with WidgetsBindingObserv
                         }
                       : null,
                   child: const Text('Save this clip', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: _card,
+                    side: BorderSide.none,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: _goFloating,
+                  icon: const Icon(Icons.picture_in_picture_alt_outlined),
+                  label: const Text('Floating window'),
                 ),
               ),
               const SizedBox(height: 10),

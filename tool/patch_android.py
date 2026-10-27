@@ -22,6 +22,9 @@ perms = """    <uses-permission android:name="android.permission.INTERNET"/>
 if "ACCESS_FINE_LOCATION" not in m:
     m = m.replace("<application", perms + "    <application", 1)
 m = re.sub(r'android:label="[^"]*"', 'android:label="PumpWatch"', m, count=1)
+if "supportsPictureInPicture" not in m:
+    # floating window (picture-in-picture) for Dashcam mode
+    m = m.replace("<activity", '<activity\n            android:supportsPictureInPicture="true"', 1)
 manifest.write_text(m)
 
 gradle = root / "android/app/build.gradle.kts"
